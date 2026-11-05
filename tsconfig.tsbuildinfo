@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/vite-env.d.ts","./src/lib/supabase.ts","./src/views/authview.tsx","./src/views/dashboardview.tsx","./src/views/paymentsview.tsx","./src/views/qraccessview.tsx","./src/views/routinesview.tsx","./src/views/studentportalview.tsx","./src/views/usersstaffview.tsx"],"version":"5.7.3"}
