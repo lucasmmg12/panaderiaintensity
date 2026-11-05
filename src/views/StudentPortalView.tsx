@@ -424,9 +424,9 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 items-start">
         {/* Left/Center: Mobile Device Frame */}
         <div className="xl:col-span-7 flex justify-center">
-          <div className="w-full max-w-[445px] rounded-[36px] bg-[#0B0D11] border-[6px] border-[#262A34] shadow-2xl overflow-hidden text-[#F3F4F6] flex flex-col min-h-[820px] relative">
-            {/* Mobile Status Bar */}
-            <div className="px-6 pt-3 pb-2 flex items-center justify-between text-[11px] font-mono text-gray-400 bg-[#111317]">
+          <div className="w-full max-w-[460px] rounded-2xl sm:rounded-[36px] bg-[#0B0D11] border sm:border-[6px] border-[#262A34] shadow-2xl overflow-hidden text-[#F3F4F6] flex flex-col sm:min-h-[820px] relative">
+            {/* Mobile Status Bar (Shown on Desktop Simulator >= sm) */}
+            <div className="hidden sm:flex px-6 pt-3 pb-2 items-center justify-between text-[11px] font-mono text-gray-400 bg-[#111317]">
               <span>09:41</span>
               <div className="w-20 h-4 rounded-full bg-black border border-white/10"></div>
               <div className="flex items-center gap-1.5">

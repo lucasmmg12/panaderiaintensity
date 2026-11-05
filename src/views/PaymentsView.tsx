@@ -378,8 +378,110 @@ export const PaymentsView: React.FC<PaymentsViewProps> = ({
             </div>
           </div>
 
-          {/* Table */}
-          <div className="overflow-x-auto">
+          {/* Mobile Responsive Card List (< md) */}
+          <div className="md:hidden divide-y divide-slate-200/40 dark:divide-[#262A34]">
+            {filteredStudents.map((student) => {
+              const isSelected = selectedStudent?.id === student.id;
+              const studentMethod = getStudentMethod(student.id);
+              return (
+                <div
+                  key={student.id}
+                  onClick={() => {
+                    setSelectedUserId(student.id);
+                    document
+                      .getElementById('voucher-inspector')
+                      ?.scrollIntoView({ behavior: 'smooth' });
+                  }}
+                  className={`p-4 space-y-3 transition ${
+                    isSelected
+                      ? isLight
+                        ? 'bg-orange-50/70'
+                        : 'bg-[#FF5722]/10'
+                      : ''
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <img
+                        src={student.avatar_url}
+                        alt={student.full_name}
+                        className="w-10 h-10 rounded-full object-cover border border-[#FF5722]/40 shrink-0"
+                      />
+                      <div className="min-w-0">
+                        <div className="text-sm font-extrabold truncate">
+                          {student.full_name}
+                        </div>
+                        <div className={`text-xs font-mono ${mutedText}`}>
+                          DNI {student.dni} • {student.plan_name}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="text-right shrink-0">
+                      <div className="text-sm font-extrabold font-mono text-[#FF5722]">
+                        ${Number(student.monthly_fee || 32000).toLocaleString('es-AR')}
+                      </div>
+                      <div className={`text-[10px] font-mono ${mutedText}`}>
+                        {studentMethod}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div
+                    className="flex items-center justify-between gap-2 pt-1"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div>
+                      {student.payment_status === 'al_dia' && (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-500">
+                          ● AL DÍA
+                        </span>
+                      )}
+                      {student.payment_status === 'por_validar' && (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-500">
+                          ● POR VALIDAR
+                        </span>
+                      )}
+                      {student.payment_status === 'vencido' && (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-red-500/15 text-red-500">
+                          ● VENCIDO
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => handleApprovePayment(student)}
+                        className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-emerald-600 text-white"
+                      >
+                        Aprobar QR
+                      </button>
+                      <button
+                        onClick={() => handleCopyMPLink(student)}
+                        className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-[#009EE3]/20 text-[#009EE3]"
+                      >
+                        Link MP
+                      </button>
+                      <button
+                        onClick={() => {
+                          setSelectedUserId(student.id);
+                          document
+                            .getElementById('voucher-inspector')
+                            ?.scrollIntoView({ behavior: 'smooth' });
+                        }}
+                        className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold border border-gray-600"
+                      >
+                        Auditar
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Desktop Table (>= md) */}
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr
@@ -533,7 +635,10 @@ export const PaymentsView: React.FC<PaymentsViewProps> = ({
         </div>
 
         {/* Right Column: Sticky Voucher Inspection & Conciliation Drawer */}
-        <div className={`xl:col-span-4 rounded-lg ${cardClass} p-5 sticky top-20 space-y-5`}>
+        <div
+          id="voucher-inspector"
+          className={`xl:col-span-4 rounded-lg ${cardClass} p-4 sm:p-5 sticky top-20 space-y-5`}
+        >
           <div className="flex items-center justify-between border-b pb-3 border-slate-200/40 dark:border-[#262A34]">
             <div className="flex items-center gap-2">
               <span className="material-symbols-outlined text-[#FF5722]">fact_check</span>

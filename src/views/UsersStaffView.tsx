@@ -195,7 +195,74 @@ export const UsersStaffView: React.FC<UsersStaffViewProps> = ({
             </div>
           </div>
 
-          <div className="overflow-x-auto">
+          {/* Mobile Responsive Cards (< md) */}
+          <div className="md:hidden divide-y divide-slate-200/40 dark:divide-[#262A34]">
+            {filteredUsers.map((u) => (
+              <div key={u.id} className="p-4 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <img
+                      src={u.avatar_url}
+                      alt={u.full_name}
+                      className="w-10 h-10 rounded-full object-cover border border-[#FF5722]/30 shrink-0"
+                    />
+                    <div className="min-w-0">
+                      <div className="text-sm font-extrabold truncate">{u.full_name}</div>
+                      <div className={`text-xs font-mono truncate ${mutedText}`}>
+                        {u.email} • DNI {u.dni}
+                      </div>
+                    </div>
+                  </div>
+                  <span
+                    className={`px-2 py-0.5 rounded text-[10px] font-mono uppercase shrink-0 ${
+                      u.role === 'profesor'
+                        ? 'bg-[#00B4D8]/15 text-[#00B4D8]'
+                        : u.role === 'admin'
+                        ? 'bg-purple-500/15 text-purple-400'
+                        : 'bg-[#FF5722]/15 text-[#FF5722]'
+                    }`}
+                  >
+                    {u.role}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 pt-1">
+                  <div className="text-xs font-bold">
+                    {u.role === 'profesor' ? u.specialty : u.plan_name}
+                  </div>
+                  {u.role === 'alumno' && coaches.length > 0 ? (
+                    <select
+                      value={u.assigned_coach_id || coaches[0].id}
+                      onChange={(e) => {
+                        const targetCoach = coaches.find((c) => c.id === e.target.value);
+                        if (targetCoach) handleAssignCoach(u, targetCoach);
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold border ${
+                        isLight
+                          ? 'bg-white border-slate-200 text-slate-700'
+                          : 'bg-[#111317] border-[#262A34] text-gray-200'
+                      }`}
+                    >
+                      {coaches.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.full_name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <button
+                      onClick={() => setSelectedCoachId(u.id)}
+                      className="px-2.5 py-1 rounded-lg text-xs font-bold bg-[#00B4D8]/15 text-[#00B4D8]"
+                    >
+                      Ver Ficha Coach
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr

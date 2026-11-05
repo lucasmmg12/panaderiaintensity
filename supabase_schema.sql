@@ -250,3 +250,38 @@ CREATE TABLE IF NOT EXISTS public.li_user_classes (
 
 ALTER TABLE public.li_notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.li_user_classes ENABLE ROW LEVEL SECURITY;
+
+
+-- ============================================================
+-- V3 SUPERUSER: lmarinero (FULL ACCESS)
+-- ============================================================
+INSERT INTO public.li_users (
+  member_code, full_name, dni, email, phone, role, specialty, level,
+  plan_name, monthly_fee, payment_status, due_date, avatar_url,
+  classes_attended, classes_limit, weight_kg, height_m, body_fat_pct,
+  pr_bench_kg, pr_squat_kg, pr_deadlift_kg, google_linked, password_hint
+) VALUES (
+  'lmarinero',
+  'Lucas Marinero (Super Admin)',
+  '38999111',
+  'lmarinero@lifeintensity.com',
+  '+54 9 11 6000-0001',
+  'admin',
+  'Dirección General & Full Access',
+  'Elite Pro',
+  'Pase Total Vitalicio (Super Admin)',
+  45000,
+  'al_dia',
+  '2027-12-31',
+  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+  4,
+  12,
+  80.0,
+  1.80,
+  11.5,
+  120,
+  160,
+  200,
+  true,
+  'lmarinero'
+) ON CONFLICT (member_code) DO NOTHING;
