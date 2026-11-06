@@ -8,6 +8,8 @@ import {
   LIAccessLog,
   LINotification,
   LIUserClass,
+  GYM_PLANS,
+  getPlanConfig,
 } from './lib/supabase';
 import { DashboardView } from './views/DashboardView';
 import { PaymentsView } from './views/PaymentsView';
@@ -60,11 +62,11 @@ export function App() {
   const [newDni, setNewDni] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [newRole, setNewRole] = useState<'alumno' | 'profesor' | 'admin'>('alumno');
-  const [newPlanName, setNewPlanName] = useState('Plan Black Intensity');
+  const [newPlanName, setNewPlanName] = useState('Plan 12 Clases');
   const [newPlanPrice, setNewPlanPrice] = useState(32000);
-  const [newPaymentMethod, setNewPaymentMethod] = useState<'Mercado Pago' | 'Transferencia'>(
-    'Mercado Pago'
-  );
+  const [newPaymentMethod, setNewPaymentMethod] = useState<
+    'Efectivo' | 'Mercado Pago' | 'Transferencia'
+  >('Efectivo');
   const [isCreatingUser, setIsCreatingUser] = useState(false);
 
   const showToast = useCallback(
@@ -375,6 +377,12 @@ export function App() {
 
   const handleDashboardApprovePayment = async (paymentId: string, userId: string) => {
     try {
+      const targetPay = payments.find((p) => p.id === paymentId);
+      const planCfg = getPlanConfig(targetPay?.plan_name);
+      const nextMonth = new Date();
+      nextMonth.setDate(nextMonth.getDate() + 30);
+      const dueStr = nextMonth.toISOString().split('T')[0];
+
       await supabase
         .from('li_payments')
         .update({ status: 'aprobado' })
@@ -382,17 +390,35 @@ export function App() {
       if (userId) {
         await supabase
           .from('li_users')
-          .update({ payment_status: 'al_dia' })
+          .update({
+            payment_status: 'al_dia',
+            plan_name: planCfg.name,
+            monthly_fee: planCfg.price,
+            classes_limit: planCfg.classesLimit,
+            classes_attended: 0,
+            due_date: dueStr,
+          })
           .eq('id', userId);
         await supabase.from('li_notifications').insert({
           user_id: userId,
-          title: '✅ Pago validado por Administración',
-          message: 'Tu comprobante fue aprobado y tu credencial QR de molinete está habilitada.',
+          title: `✅ Pago Aceptado • ${
+            planCfg.isUnlimited ? 'Pase Libre ∞' : `${planCfg.classesLimit} Clases`
+          } acreditadas`,
+          message: `El Profesor/Admin aceptó tu pago (${targetPay?.payment_method || 'Efectivo'}). Ya tienes ${
+            planCfg.isUnlimited
+              ? 'clases ilimitadas (Pase Libre)'
+              : `${planCfg.classesLimit} clases disponibles`
+          } y tu QR habilitado.`,
           notif_type: 'pago',
           is_read: false,
         });
       }
-      showToast('Comprobante aprobado y molinete QR habilitado.', 'success');
+      showToast(
+        `Pago aceptado: ${
+          planCfg.isUnlimited ? 'Pase Libre ∞' : `${planCfg.classesLimit} clases`
+        } acreditadas y QR activo.`,
+        'success'
+      );
       fetchAllData();
     } catch (err) {
       console.error(err);
@@ -422,6 +448,7 @@ export function App() {
       nextMonth.setMonth(nextMonth.getMonth() + 1);
       const dueStr = nextMonth.toISOString().split('T')[0];
       const memberCode = `LI-${Math.floor(1000 + Math.random() * 9000)}`;
+      const selectedCfg = getPlanConfig(newPlanName);
 
       const { data: insertedUser, error } = await supabase
         .from('li_users')
@@ -436,14 +463,14 @@ export function App() {
           role: newRole,
           avatar_url:
             'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-          plan_name: newRole === 'profesor' ? 'Staff Coach' : newPlanName,
-          monthly_fee: newRole === 'profesor' ? 0 : Number(newPlanPrice),
+          plan_name: newRole === 'profesor' ? 'Staff Coach' : selectedCfg.name,
+          monthly_fee: newRole === 'profesor' ? 0 : Number(selectedCfg.price),
           payment_status: 'al_dia',
           due_date: dueStr,
           specialty: newRole === 'profesor' ? 'Fuerza & Acondicionamiento' : 'Hipertrofia',
           level: 'Intermedio',
-          classes_attended: 1,
-          classes_limit: 12,
+          classes_attended: 0,
+          classes_limit: selectedCfg.classesLimit,
           weight_kg: 76,
           height_m: 1.76,
           body_fat_pct: 13.5,
@@ -463,17 +490,24 @@ export function App() {
           user_name: insertedUser.full_name,
           user_dni: insertedUser.dni,
           user_avatar: insertedUser.avatar_url,
-          plan_name: newPlanName,
-          amount: Number(newPlanPrice),
+          plan_name: selectedCfg.name,
+          amount: Number(selectedCfg.price),
           payment_method: newPaymentMethod,
-          bank_name: newPaymentMethod === 'Mercado Pago' ? 'Mercado Pago' : 'Banco Galicia',
+          bank_name:
+            newPaymentMethod === 'Efectivo'
+              ? 'Caja Efectivo Profesor/Admin'
+              : newPaymentMethod === 'Mercado Pago'
+              ? 'Mercado Pago'
+              : 'Banco Galicia',
           control_number: `CTRL-${Math.floor(100000 + Math.random() * 900000)}`,
           status: 'aprobado',
         });
       }
 
       showToast(
-        `Usuario ${newFullName} (${memberCode}) dado de alta en Supabase con QR habilitado`,
+        `Usuario ${newFullName} (${memberCode}) dado de alta con ${
+          selectedCfg.isUnlimited ? 'Pase Libre ∞' : `${selectedCfg.classesLimit} clases`
+        } disponibles`,
         'success'
       );
       setNewFullName('');
@@ -1365,14 +1399,13 @@ export function App() {
               {newRole === 'alumno' && (
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-bold mb-1">Plan</label>
+                    <label className="block text-xs font-bold mb-1">Plan de Clases</label>
                     <select
                       value={newPlanName}
                       onChange={(e) => {
-                        setNewPlanName(e.target.value);
-                        if (e.target.value.includes('Elite')) setNewPlanPrice(45000);
-                        else if (e.target.value.includes('Black')) setNewPlanPrice(32000);
-                        else setNewPlanPrice(24000);
+                        const cfg = getPlanConfig(e.target.value);
+                        setNewPlanName(cfg.name);
+                        setNewPlanPrice(cfg.price);
                       }}
                       className={`w-full px-3 py-2 rounded-lg text-sm border ${
                         isLight
@@ -1380,9 +1413,12 @@ export function App() {
                           : 'bg-[#111317] border-[#262A34] text-white'
                       }`}
                     >
-                      <option value="Plan Black Intensity">Plan Black ($32.000)</option>
-                      <option value="Plan Elite Power">Plan Elite ($45.000)</option>
-                      <option value="Plan Musculación Base">Plan Base ($24.000)</option>
+                      {GYM_PLANS.map((p) => (
+                        <option key={p.id} value={p.name}>
+                          {p.name} (${p.price.toLocaleString('es-AR')} •{' '}
+                          {p.isUnlimited ? '∞ Libre' : `${p.classesLimit} clases`})
+                        </option>
+                      ))}
                     </select>
                   </div>
                   <div>
@@ -1391,7 +1427,7 @@ export function App() {
                       value={newPaymentMethod}
                       onChange={(e) =>
                         setNewPaymentMethod(
-                          e.target.value as 'Mercado Pago' | 'Transferencia'
+                          e.target.value as 'Efectivo' | 'Mercado Pago' | 'Transferencia'
                         )
                       }
                       className={`w-full px-3 py-2 rounded-lg text-sm border ${
@@ -1400,6 +1436,7 @@ export function App() {
                           : 'bg-[#111317] border-[#262A34] text-white'
                       }`}
                     >
+                      <option value="Efectivo">Efectivo (Acepta Profesor/Admin)</option>
                       <option value="Mercado Pago">Mercado Pago</option>
                       <option value="Transferencia">Transferencia</option>
                     </select>

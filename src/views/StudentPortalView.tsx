@@ -10,6 +10,9 @@ import {
   LIUserClass,
   LIAccessLog,
   EFFORT_FACES,
+  GYM_PLANS,
+  getPlanConfig,
+  isUnlimitedPlan,
   supabase,
 } from '../lib/supabase';
 
@@ -53,7 +56,8 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
   // Payment Hub state
   const [selectedPayMethod, setSelectedPayMethod] = useState<
     'transferencia' | 'mercadopago' | 'efectivo'
-  >('transferencia');
+  >('efectivo');
+  const [chosenPlanName, setChosenPlanName] = useState<string>('Plan 12 Clases');
   const [bankName, setBankName] = useState('Banco Galicia');
   const [controlNumber, setControlNumber] = useState('');
   const [receiptFileName, setReceiptFileName] = useState<string>('');
@@ -99,6 +103,9 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
   const currentStudent =
     students.find((s) => s.id === activeStudentId) || students[0];
 
+  const chosenPlanCfg = getPlanConfig(chosenPlanName || currentStudent?.plan_name);
+  const studentUnlimited = currentStudent ? isUnlimitedPlan(currentStudent) : false;
+
   const studentRoutine =
     routines.find((r) => r.student_id === currentStudent?.id) || routines[0];
   const routineDays: LIRoutineDay[] = Array.isArray(studentRoutine?.days_json)
@@ -137,6 +144,111 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
     }
   };
 
+  // Option 1: Request Cash Payment (waits for Profesor or Admin to accept)
+  const handleRequestCashPayment = async () => {
+    if (!currentStudent) return;
+    setIsSubmittingPayment(true);
+    try {
+      const code = `EFE-${Math.floor(10000 + Math.random() * 90000)}`;
+      await supabase
+        .from('li_users')
+        .update({
+          payment_status: 'por_validar',
+          plan_name: chosenPlanCfg.name,
+          monthly_fee: chosenPlanCfg.price,
+        })
+        .eq('id', currentStudent.id);
+
+      await supabase.from('li_payments').insert({
+        receipt_code: code,
+        user_id: currentStudent.id,
+        user_name: currentStudent.full_name,
+        user_dni: currentStudent.dni,
+        user_avatar: currentStudent.avatar_url,
+        plan_name: chosenPlanCfg.name,
+        amount: chosenPlanCfg.price,
+        payment_method: 'Efectivo',
+        bank_name: 'Efectivo en Recepción / Profesor',
+        control_number: `CAJA-${Math.floor(1000 + Math.random() * 9000)}`,
+        status: 'pendiente',
+      });
+
+      await supabase.from('li_notifications').insert({
+        user_id: currentStudent.id,
+        title: `💵 Pago en Efectivo informado (${code})`,
+        message: `Informaste pago en efectivo por ${chosenPlanCfg.name} ($${chosenPlanCfg.price.toLocaleString(
+          'es-AR'
+        )}). En cuanto el Profesor o Admin acepte el pago, tendrás tus ${
+          chosenPlanCfg.isUnlimited ? 'Pase Libre ∞' : `${chosenPlanCfg.classesLimit} clases`
+        } disponibles.`,
+        notif_type: 'pago',
+        is_read: false,
+      });
+
+      onShowToast(
+        `Orden en Efectivo ${code} generada. Cuando el Profesor/Admin acepte el pago se acreditarán tus ${chosenPlanCfg.shortName}.`,
+        'warning'
+      );
+      onRefresh();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsSubmittingPayment(false);
+    }
+  };
+
+  // Simulate Profesor/Admin accepting the payment right away
+  const handleSimulateProfessorAcceptsPayment = async (pay?: LIPayment) => {
+    if (!currentStudent) return;
+    setIsSubmittingPayment(true);
+    try {
+      const activePlanCfg = pay ? getPlanConfig(pay.plan_name) : chosenPlanCfg;
+      const nextDueDate = new Date();
+      nextDueDate.setMonth(nextDueDate.getMonth() + 1);
+      const nextDueStr = nextDueDate.toISOString().split('T')[0];
+
+      await supabase
+        .from('li_users')
+        .update({
+          payment_status: 'al_dia',
+          plan_name: activePlanCfg.name,
+          monthly_fee: activePlanCfg.price,
+          classes_limit: activePlanCfg.classesLimit,
+          classes_attended: 0,
+          due_date: nextDueStr,
+        })
+        .eq('id', currentStudent.id);
+
+      await supabase
+        .from('li_payments')
+        .update({ status: 'aprobado' })
+        .eq('user_id', currentStudent.id)
+        .eq('status', 'pendiente');
+
+      const creditsText = activePlanCfg.isUnlimited
+        ? 'PASE LIBRE ILIMITADO (∞ clases)'
+        : `${activePlanCfg.classesLimit} CLASES DISPONIBLES`;
+
+      await supabase.from('li_notifications').insert({
+        user_id: currentStudent.id,
+        title: `✅ ¡El Profesor aceptó tu pago! (${activePlanCfg.name})`,
+        message: `Ya tienes acreditadas tus ${creditsText} en tu cuenta y tu QR de molinete está habilitado.`,
+        notif_type: 'clases_restantes',
+        is_read: false,
+      });
+
+      onShowToast(
+        `¡Pago aceptado por el Profesor! Se acreditaron ${creditsText} a ${currentStudent.full_name}.`,
+        'success'
+      );
+      onRefresh();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsSubmittingPayment(false);
+    }
+  };
+
   const handleUploadTransferReceipt = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentStudent) return;
@@ -147,7 +259,11 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
 
       await supabase
         .from('li_users')
-        .update({ payment_status: 'por_validar' })
+        .update({
+          payment_status: 'por_validar',
+          plan_name: chosenPlanCfg.name,
+          monthly_fee: chosenPlanCfg.price,
+        })
         .eq('id', currentStudent.id);
 
       await supabase.from('li_payments').insert({
@@ -156,8 +272,8 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
         user_name: currentStudent.full_name,
         user_dni: currentStudent.dni,
         user_avatar: currentStudent.avatar_url,
-        plan_name: currentStudent.plan_name || 'Plan Black Intensity',
-        amount: currentStudent.monthly_fee || 32000,
+        plan_name: chosenPlanCfg.name,
+        amount: chosenPlanCfg.price,
         payment_method: 'Transferencia',
         bank_name: bankName,
         control_number: ctrl,
@@ -167,10 +283,10 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
 
       await supabase.from('li_notifications').insert({
         user_id: currentStudent.id,
-        title: '📄 Comprobante recibido en revisión',
-        message: `Recibimos tu comprobante ${code} (${bankName}) por $${Number(
-          currentStudent.monthly_fee || 32000
-        ).toLocaleString('es-AR')}. Administración lo validará en breve.`,
+        title: `📄 Comprobante recibido (${chosenPlanCfg.name})`,
+        message: `Recibimos tu comprobante ${code} (${bankName}) por $${chosenPlanCfg.price.toLocaleString(
+          'es-AR'
+        )}. Al ser aceptado por el Profesor/Admin se acreditarán tus ${chosenPlanCfg.shortName}.`,
         notif_type: 'pago',
         is_read: false,
       });
@@ -178,7 +294,7 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
       setControlNumber('');
       setReceiptFileName('');
       onShowToast(
-        `Comprobante ${code} subido con éxito. Quedó registrado en tu historial de pagos.`,
+        `Comprobante ${code} subido (${chosenPlanCfg.name}). Al ser aceptado tendrás tus ${chosenPlanCfg.shortName}.`,
         'success'
       );
       onRefresh();
@@ -194,7 +310,6 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
     if (!currentStudent) return;
     setIsSubmittingPayment(true);
     try {
-      // Open the redirection link in a new tab so Mercado Pago handles checkout
       window.open(mpRedirectUrl, '_blank', 'noopener,noreferrer');
 
       const code = `MP-${Math.floor(10000 + Math.random() * 90000)}`;
@@ -206,6 +321,10 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
         .from('li_users')
         .update({
           payment_status: 'al_dia',
+          plan_name: chosenPlanCfg.name,
+          monthly_fee: chosenPlanCfg.price,
+          classes_limit: chosenPlanCfg.classesLimit,
+          classes_attended: 0,
           due_date: nextDueStr,
         })
         .eq('id', currentStudent.id);
@@ -216,24 +335,28 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
         user_name: currentStudent.full_name,
         user_dni: currentStudent.dni,
         user_avatar: currentStudent.avatar_url,
-        plan_name: currentStudent.plan_name || 'Plan Black Intensity',
-        amount: currentStudent.monthly_fee || 32000,
+        plan_name: chosenPlanCfg.name,
+        amount: chosenPlanCfg.price,
         payment_method: 'Mercado Pago',
         bank_name: 'Mercado Pago Checkout Redirección',
         control_number: `MP-WH-${Math.floor(100000 + Math.random() * 900000)}`,
         status: 'aprobado',
       });
 
+      const creditsText = chosenPlanCfg.isUnlimited
+        ? 'PASE LIBRE ILIMITADO (∞ clases)'
+        : `${chosenPlanCfg.classesLimit} CLASES DISPONIBLES`;
+
       await supabase.from('li_notifications').insert({
         user_id: currentStudent.id,
-        title: '✅ Pago acreditado vía Mercado Pago',
-        message: `Tu pago ${code} fue procesado por Mercado Pago. Tu pase vence el ${nextDueStr} y tu QR está habilitado.`,
-        notif_type: 'pago',
+        title: `✅ Pago acreditado vía Mercado Pago (${chosenPlanCfg.name})`,
+        message: `Tu pago ${code} fue procesado. Se acreditaron tus ${creditsText} hasta el ${nextDueStr}.`,
+        notif_type: 'clases_restantes',
         is_read: false,
       });
 
       onShowToast(
-        'Redirigido a Mercado Pago y pago registrado en tu historial. ¡Pase QR habilitado!',
+        `¡Pago Mercado Pago acreditado! Tienes ${creditsText}.`,
         'success'
       );
       onRefresh();
@@ -246,6 +369,14 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
 
   const handleBookNewClass = async (cls: LIClass) => {
     if (!currentStudent) return;
+    if (!studentUnlimited && classesRemaining <= 0) {
+      onShowToast(
+        'Has agotado tus clases disponibles. Renueva tu plan (8, 12 o Pase Libre) en la pestaña Pagos.',
+        'error'
+      );
+      setActiveTab('pagos');
+      return;
+    }
     try {
       await supabase.from('li_user_classes').insert({
         user_id: currentStudent.id,
@@ -543,10 +674,14 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                         </span>
                       </div>
                       <div className="text-sm font-mono font-extrabold mt-1">
-                        Quedan {classesRemaining} de {currentStudent.classes_limit || 12}
+                        {currentStudent.payment_status !== 'al_dia'
+                          ? '0 habilitadas (Pendiente)'
+                          : studentUnlimited
+                          ? '∞ PASE LIBRE'
+                          : `Quedan ${classesRemaining} de ${currentStudent.classes_limit || 8}`}
                       </div>
                       <div className="text-[10px] text-gray-400 mt-0.5">
-                        {currentStudent.classes_attended || 0} clases asistidas
+                        {currentStudent.classes_attended || 0} clases asistidas este ciclo
                       </div>
                     </div>
                   </div>
@@ -566,7 +701,11 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                             : 'bg-red-500/15 text-red-400 border border-red-500/30'
                         }`}
                       >
-                        {currentStudent.payment_status.replace('_', ' ')}
+                        {currentStudent.payment_status === 'al_dia'
+                          ? 'PAGO ACEPTADO • AL DÍA'
+                          : currentStudent.payment_status === 'por_validar'
+                          ? 'ESPERANDO ACEPTACIÓN PROFESOR/ADMIN'
+                          : 'VENCIDO / SIN CRÉDITOS'}
                       </span>
                     </div>
 
@@ -574,7 +713,9 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                       <div>
                         <div className="text-base font-extrabold">{currentStudent.plan_name}</div>
                         <div className="text-xs text-gray-400 font-mono">
-                          Cuota mensual • Renovación automática o manual
+                          {studentUnlimited
+                            ? 'Acceso ilimitado a clases del mes'
+                            : `Pack mensual de ${currentStudent.classes_limit || 8} clases`}
                         </div>
                       </div>
                       <div className="text-xl font-extrabold font-mono text-[#FF5722]">
@@ -582,26 +723,36 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2 pt-1">
+                    <div className="grid grid-cols-3 gap-1.5 pt-1">
+                      <button
+                        onClick={() => {
+                          setSelectedPayMethod('efectivo');
+                          setActiveTab('pagos');
+                        }}
+                        className="py-2 px-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold flex items-center justify-center gap-1 transition cursor-pointer"
+                      >
+                        <span className="material-symbols-outlined text-[15px]">payments</span>
+                        Efectivo
+                      </button>
                       <button
                         onClick={() => {
                           setSelectedPayMethod('mercadopago');
                           setActiveTab('pagos');
                         }}
-                        className="py-2.5 px-3 rounded-lg bg-[#009EE3] hover:bg-[#008ACA] text-white text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                        className="py-2 px-2 rounded-lg bg-[#009EE3] hover:bg-[#008ACA] text-white text-[11px] font-bold flex items-center justify-center gap-1 transition cursor-pointer"
                       >
-                        <span className="material-symbols-outlined text-[16px]">bolt</span>
-                        Pagar con MP
+                        <span className="material-symbols-outlined text-[15px]">bolt</span>
+                        MercadoPago
                       </button>
                       <button
                         onClick={() => {
                           setSelectedPayMethod('transferencia');
                           setActiveTab('pagos');
                         }}
-                        className="py-2.5 px-3 rounded-lg bg-white/5 hover:bg-white/10 border border-[#262A34] text-gray-200 text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                        className="py-2 px-2 rounded-lg bg-white/5 hover:bg-white/10 border border-[#262A34] text-gray-200 text-[11px] font-bold flex items-center justify-center gap-1 transition cursor-pointer"
                       >
-                        <span className="material-symbols-outlined text-[16px]">upload_file</span>
-                        Subir Comprobante
+                        <span className="material-symbols-outlined text-[15px]">upload_file</span>
+                        Transferir
                       </button>
                     </div>
                   </div>
@@ -677,54 +828,145 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                 </>
               )}
 
-              {/* TAB 2: PAGOS (PASARELA MULTIMÉTODO + HISTORIAL DE PAGOS DEL USUARIO) */}
+              {/* TAB 2: PAGOS (SELECTOR DE PLAN 8, 12, PASE LIBRE + PASARELA MULTIMÉTODO) */}
               {activeTab === 'pagos' && currentStudent && (
                 <div className="space-y-4">
                   <div>
                     <h3 className="text-base font-extrabold">
-                      Centro de Pagos y Mis Comprobantes
+                      Elegir Plan y Abonar Membresía
                     </h3>
                     <p className="text-xs text-gray-400">
-                      Elige cómo abonar tu cuota ({currentStudent.plan_name} — $
-                      {Number(currentStudent.monthly_fee || 32000).toLocaleString('es-AR')})
+                      Una vez que el Profesor o Admin acepte tu pago, se acreditan tus clases inmediatamente.
                     </p>
                   </div>
 
-                  {/* Payment Method Selector Tabs */}
-                  <div className="grid grid-cols-3 gap-1.5 p-1 rounded-xl bg-[#181B22] border border-[#262A34]">
-                    <button
-                      onClick={() => setSelectedPayMethod('transferencia')}
-                      className={`py-2 px-2 rounded-lg text-[11px] font-bold transition cursor-pointer ${
-                        selectedPayMethod === 'transferencia'
-                          ? 'bg-[#FF5722] text-white'
-                          : 'text-gray-400 hover:text-white'
-                      }`}
-                    >
-                      1. Transferencia
-                    </button>
-                    <button
-                      onClick={() => setSelectedPayMethod('mercadopago')}
-                      className={`py-2 px-2 rounded-lg text-[11px] font-bold transition cursor-pointer ${
-                        selectedPayMethod === 'mercadopago'
-                          ? 'bg-[#009EE3] text-white'
-                          : 'text-gray-400 hover:text-white'
-                      }`}
-                    >
-                      2. Mercado Pago
-                    </button>
-                    <button
-                      onClick={() => setSelectedPayMethod('efectivo')}
-                      className={`py-2 px-2 rounded-lg text-[11px] font-bold transition cursor-pointer ${
-                        selectedPayMethod === 'efectivo'
-                          ? 'bg-emerald-600 text-white'
-                          : 'text-gray-400 hover:text-white'
-                      }`}
-                    >
-                      3. Recepción
-                    </button>
+                  {/* PASO 1: ELEGIR PLAN (8 CLASES, 12 CLASES, PASE LIBRE) */}
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] font-mono font-bold uppercase text-[#FF5722]">
+                      Paso 1: Selecciona tu Plan de Clases
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {GYM_PLANS.map((plan) => {
+                        const isSelected = chosenPlanCfg.id === plan.id;
+                        return (
+                          <button
+                            key={plan.id}
+                            type="button"
+                            onClick={() => setChosenPlanName(plan.name)}
+                            className={`p-2.5 rounded-xl border text-left transition cursor-pointer relative ${
+                              isSelected
+                                ? 'bg-[#FF5722]/15 border-[#FF5722] text-white shadow-md'
+                                : 'bg-[#181B22] border-[#262A34] text-gray-300 hover:border-gray-500'
+                            }`}
+                          >
+                            <div className="text-[9px] font-mono font-extrabold uppercase text-[#00B4D8] truncate">
+                              {plan.frequencyLabel}
+                            </div>
+                            <div className="text-xs font-extrabold mt-0.5 leading-tight">
+                              {plan.shortName}
+                            </div>
+                            <div className="text-xs font-mono font-extrabold text-[#FF5722] mt-1">
+                              ${plan.price.toLocaleString('es-AR')}
+                            </div>
+                            <div className="text-[9px] text-gray-400 mt-0.5 leading-tight">
+                              {plan.isUnlimited ? '∞ Clases libres' : `${plan.classesLimit} créditos/mes`}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
 
-                  {/* METHOD 1: TRANSFERENCIA + UPLOAD COMPROBANTE */}
+                  {/* PASO 2: ELEGIR MÉTODO DE PAGO */}
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] font-mono font-bold uppercase text-[#00B4D8]">
+                      Paso 2: Cómo deseas abonar ({chosenPlanCfg.name} — $
+                      {chosenPlanCfg.price.toLocaleString('es-AR')})
+                    </div>
+                    <div className="grid grid-cols-3 gap-1.5 p-1 rounded-xl bg-[#181B22] border border-[#262A34]">
+                      <button
+                        onClick={() => setSelectedPayMethod('efectivo')}
+                        className={`py-2 px-2 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                          selectedPayMethod === 'efectivo'
+                            ? 'bg-emerald-600 text-white'
+                            : 'text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        1. Efectivo (Prof.)
+                      </button>
+                      <button
+                        onClick={() => setSelectedPayMethod('transferencia')}
+                        className={`py-2 px-2 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                          selectedPayMethod === 'transferencia'
+                            ? 'bg-[#FF5722] text-white'
+                            : 'text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        2. Transferencia
+                      </button>
+                      <button
+                        onClick={() => setSelectedPayMethod('mercadopago')}
+                        className={`py-2 px-2 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                          selectedPayMethod === 'mercadopago'
+                            ? 'bg-[#009EE3] text-white'
+                            : 'text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        3. Mercado Pago
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* METHOD 1: EFECTIVO CON PROFESOR / RECEPCIÓN */}
+                  {selectedPayMethod === 'efectivo' && (
+                    <div className="p-4 rounded-xl bg-[#181B22] border border-emerald-500/40 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-extrabold text-emerald-400 flex items-center gap-1.5">
+                          <span className="material-symbols-outlined text-[18px]">payments</span>
+                          Pago en Efectivo al Profesor o Admin
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 text-[10px] font-mono font-bold">
+                          +{chosenPlanCfg.isUnlimited ? '∞ Clases' : `${chosenPlanCfg.classesLimit} Clases`}
+                        </span>
+                      </div>
+
+                      <p className="text-xs text-gray-300 leading-relaxed">
+                        1. Informa tu pago aquí y entrega <strong>${chosenPlanCfg.price.toLocaleString('es-AR')}</strong> en efectivo a tu Profesor o en Recepción.<br />
+                        2. Apenas el Profesor/Admin presione <strong>"Aceptar Pago"</strong> en su celular o panel, el sistema te acreditará automáticamente tus{' '}
+                        <strong>
+                          {chosenPlanCfg.isUnlimited
+                            ? 'clases ilimitadas (Pase Libre ∞)'
+                            : `${chosenPlanCfg.classesLimit} clases disponibles`}
+                        </strong>.
+                      </p>
+
+                      <button
+                        type="button"
+                        disabled={isSubmittingPayment}
+                        onClick={handleRequestCashPayment}
+                        className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold flex items-center justify-center gap-2 shadow-lg cursor-pointer transition"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">point_of_sale</span>
+                        {isSubmittingPayment
+                          ? 'Registrando aviso...'
+                          : `Informar Pago en Efectivo (${chosenPlanCfg.shortName} - $${chosenPlanCfg.price.toLocaleString('es-AR')})`}
+                      </button>
+
+                      {/* Botón Demo directo para probar la aceptación del profesor sin salir del celular */}
+                      <div className="pt-2 border-t border-[#262A34]">
+                        <button
+                          type="button"
+                          onClick={() => handleSimulateProfessorAcceptsPayment()}
+                          className="w-full py-2 px-3 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition"
+                        >
+                          <span className="material-symbols-outlined text-[15px]">verified</span>
+                          ⚡ Demo: Simular que el Profesor/Admin Acepta el Pago Ahora
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* METHOD 2: TRANSFERENCIA + UPLOAD COMPROBANTE */}
                   {selectedPayMethod === 'transferencia' && (
                     <form
                       onSubmit={handleUploadTransferReceipt}
@@ -752,13 +994,13 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                           <span className="font-bold text-white">LIFE.INTENSITY.GYM</span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-gray-400">CBU:</span>
-                          <span className="font-bold text-gray-200">0070999030004028192011</span>
+                          <span className="text-gray-400">Plan elegido:</span>
+                          <span className="font-bold text-[#00B4D8]">{chosenPlanCfg.name}</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-gray-400">Monto a transferir:</span>
                           <span className="font-bold text-emerald-400">
-                            ${Number(currentStudent.monthly_fee || 32000).toLocaleString('es-AR')}
+                            ${chosenPlanCfg.price.toLocaleString('es-AR')}
                           </span>
                         </div>
                       </div>
@@ -815,7 +1057,7 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                               : 'Toca para adjuntar foto o PDF del comprobante'}
                           </div>
                           <div className="text-[10px] text-gray-400">
-                            JPG, PNG o PDF (máx 10MB)
+                            Al ser aceptado se acreditan {chosenPlanCfg.isUnlimited ? '∞ clases' : `${chosenPlanCfg.classesLimit} clases`}
                           </div>
                         </label>
 
@@ -826,13 +1068,13 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                         >
                           {isSubmittingPayment
                             ? 'Subiendo comprobante...'
-                            : 'Informar Transferencia y Subir Comprobante'}
+                            : `Subir Comprobante (${chosenPlanCfg.shortName})`}
                         </button>
                       </div>
                     </form>
                   )}
 
-                  {/* METHOD 2: MERCADO PAGO REDIRECTION LINK */}
+                  {/* METHOD 3: MERCADO PAGO REDIRECTION LINK */}
                   {selectedPayMethod === 'mercadopago' && (
                     <div className="p-4 rounded-xl bg-[#181B22] border border-[#009EE3]/40 space-y-3">
                       <div className="flex items-center justify-between">
@@ -841,12 +1083,16 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                           Checkout Oficial Mercado Pago
                         </span>
                         <span className="px-2 py-0.5 rounded bg-[#009EE3]/20 text-[#009EE3] text-[10px] font-mono font-bold">
-                          Redirección Segura
+                          Acreditación Automática
                         </span>
                       </div>
 
                       <p className="text-xs text-gray-300 leading-relaxed">
-                        Al hacer clic serás redirigido al link de pago de <strong>Mercado Pago</strong>, donde podrás abonar con dinero en cuenta, tarjeta de débito o crédito. Mercado Pago gestionará la acreditación automática.
+                        Serás redirigido al link de <strong>Mercado Pago</strong> para abonar tu <strong>{chosenPlanCfg.name}</strong> y se habilitarán tus{' '}
+                        <strong>
+                          {chosenPlanCfg.isUnlimited ? 'clases ilimitadas (∞)' : `${chosenPlanCfg.classesLimit} clases`}
+                        </strong>{' '}
+                        en el acto.
                       </p>
 
                       <div>
@@ -868,22 +1114,9 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                         className="w-full py-3 rounded-xl bg-[#009EE3] hover:bg-[#008ACA] text-white text-xs font-extrabold flex items-center justify-center gap-2 shadow-lg cursor-pointer"
                       >
                         <span className="material-symbols-outlined text-[18px]">open_in_new</span>
-                        Ir a Pagar con Mercado Pago ($
-                        {Number(currentStudent.monthly_fee || 32000).toLocaleString('es-AR')})
+                        Pagar {chosenPlanCfg.shortName} con Mercado Pago ($
+                        {chosenPlanCfg.price.toLocaleString('es-AR')})
                       </button>
-                    </div>
-                  )}
-
-                  {/* METHOD 3: EFECTIVO EN RECEPCIÓN */}
-                  {selectedPayMethod === 'efectivo' && (
-                    <div className="p-4 rounded-xl bg-[#181B22] border border-[#262A34] space-y-3 text-center">
-                      <span className="material-symbols-outlined text-3xl text-emerald-400">
-                        storefront
-                      </span>
-                      <div className="text-sm font-extrabold">Pago Presencial en Recepción</div>
-                      <p className="text-xs text-gray-400">
-                        Presenta tu código de socio <strong>{currentStudent.member_code}</strong> en el mostrador de Sede Belgrano para abonar en efectivo.
-                      </p>
                     </div>
                   )}
 
@@ -903,38 +1136,51 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                       myPayments.map((pay) => (
                         <div
                           key={pay.id}
-                          className="p-3 rounded-xl bg-[#181B22] border border-[#262A34] flex items-center justify-between gap-2"
+                          className="p-3 rounded-xl bg-[#181B22] border border-[#262A34] space-y-2"
                         >
-                          <div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-xs font-extrabold font-mono text-white">
-                                {pay.receipt_code}
-                              </span>
-                              <span className="text-[11px] text-gray-400">
-                                • {pay.payment_method}
-                              </span>
+                          <div className="flex items-center justify-between gap-2">
+                            <div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs font-extrabold font-mono text-white">
+                                  {pay.receipt_code}
+                                </span>
+                                <span className="text-[11px] text-gray-400">
+                                  • {pay.payment_method}
+                                </span>
+                              </div>
+                              <div className="text-[11px] text-gray-400">
+                                {pay.plan_name} • {pay.bank_name || 'Caja'}
+                              </div>
                             </div>
-                            <div className="text-[11px] text-gray-400">
-                              {pay.plan_name} • {pay.bank_name || 'Caja'}
+
+                            <div className="text-right">
+                              <div className="text-xs font-mono font-extrabold text-[#FF5722]">
+                                ${Number(pay.amount).toLocaleString('es-AR')}
+                              </div>
+                              <span
+                                className={`inline-block px-2 py-0.5 rounded text-[9px] font-bold uppercase ${
+                                  pay.status === 'aprobado'
+                                    ? 'bg-emerald-500/15 text-emerald-400'
+                                    : pay.status === 'pendiente'
+                                    ? 'bg-amber-500/15 text-amber-400'
+                                    : 'bg-red-500/15 text-red-400'
+                                }`}
+                              >
+                                {pay.status === 'aprobado' ? 'ACEPTADO' : pay.status}
+                              </span>
                             </div>
                           </div>
 
-                          <div className="text-right">
-                            <div className="text-xs font-mono font-extrabold text-[#FF5722]">
-                              ${Number(pay.amount).toLocaleString('es-AR')}
-                            </div>
-                            <span
-                              className={`inline-block px-2 py-0.5 rounded text-[9px] font-bold uppercase ${
-                                pay.status === 'aprobado'
-                                  ? 'bg-emerald-500/15 text-emerald-400'
-                                  : pay.status === 'pendiente'
-                                  ? 'bg-amber-500/15 text-amber-400'
-                                  : 'bg-red-500/15 text-red-400'
-                              }`}
+                          {pay.status === 'pendiente' && (
+                            <button
+                              type="button"
+                              onClick={() => handleSimulateProfessorAcceptsPayment(pay)}
+                              className="w-full py-1.5 px-2.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 text-[10px] font-extrabold flex items-center justify-center gap-1 cursor-pointer transition"
                             >
-                              {pay.status}
-                            </span>
-                          </div>
+                              <span className="material-symbols-outlined text-[14px]">check_circle</span>
+                              Aceptar Pago (Vista Profesor/Admin) y Acreditar Clases
+                            </button>
+                          )}
                         </div>
                       ))
                     )}
@@ -951,7 +1197,20 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
                         Mis Clases y Nivel de Esfuerzo
                       </h3>
                       <p className="text-xs text-gray-400">
-                        Te quedan <strong className="text-[#00B4D8]">{classesRemaining}</strong> clases disponibles este mes.
+                        {currentStudent?.payment_status !== 'al_dia' ? (
+                          <span className="text-amber-400 font-bold">
+                            Pago pendiente de aceptación por el Profesor/Admin para habilitar reservas.
+                          </span>
+                        ) : studentUnlimited ? (
+                          <span>
+                            Tienes <strong className="text-emerald-400">∞ PASE LIBRE ILIMITADO</strong> activo este mes.
+                          </span>
+                        ) : (
+                          <span>
+                            Te quedan <strong className="text-[#00B4D8]">{classesRemaining}</strong> de{' '}
+                            <strong>{currentStudent?.classes_limit || 8}</strong> clases disponibles este mes.
+                          </span>
+                        )}
                       </p>
                     </div>
                   </div>

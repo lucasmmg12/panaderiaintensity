@@ -5,6 +5,82 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIU
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+export interface GymPlanOption {
+  id: 'plan_8' | 'plan_12' | 'pase_libre';
+  name: string;
+  shortName: string;
+  price: number;
+  classesLimit: number; // 8, 12, or 999 for Pase Libre
+  isUnlimited: boolean;
+  frequencyLabel: string;
+  description: string;
+  badgeColor: string;
+}
+
+export const GYM_PLANS: GymPlanOption[] = [
+  {
+    id: 'plan_8',
+    name: 'Plan 8 Clases',
+    shortName: '8 Clases/mes',
+    price: 24000,
+    classesLimit: 8,
+    isUnlimited: false,
+    frequencyLabel: '2 veces por semana',
+    description: 'Acredita 8 clases mensuales. Se descuenta 1 crédito por cada reserva o ingreso QR.',
+    badgeColor: 'bg-sky-500/15 text-sky-400 border-sky-500/30',
+  },
+  {
+    id: 'plan_12',
+    name: 'Plan 12 Clases',
+    shortName: '12 Clases/mes',
+    price: 32000,
+    classesLimit: 12,
+    isUnlimited: false,
+    frequencyLabel: '3 veces por semana',
+    description: 'Acredita 12 clases mensuales. Ideal para mesociclos de 3 estímulos semanales.',
+    badgeColor: 'bg-[#FF5722]/15 text-[#FF5722] border-[#FF5722]/30',
+  },
+  {
+    id: 'pase_libre',
+    name: 'Plan Pase Libre',
+    shortName: 'Pase Libre ∞',
+    price: 45000,
+    classesLimit: 999,
+    isUnlimited: true,
+    frequencyLabel: 'Acceso Ilimitado (Lunes a Sábado)',
+    description: 'Clases ilimitadas durante 30 días en sala de musculación y boxes.',
+    badgeColor: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+  },
+];
+
+export function getPlanConfig(planName?: string): GymPlanOption {
+  if (!planName) return GYM_PLANS[1];
+  const lower = planName.toLowerCase();
+  if (lower.includes('8') || lower.includes('base') || lower.includes('inicial')) {
+    return GYM_PLANS[0];
+  }
+  if (
+    lower.includes('libre') ||
+    lower.includes('elite') ||
+    lower.includes('total') ||
+    lower.includes('ilimitado')
+  ) {
+    return GYM_PLANS[2];
+  }
+  return GYM_PLANS[1]; // Default 12 clases
+}
+
+export function isUnlimitedPlan(user: { plan_name?: string; classes_limit?: number }): boolean {
+  if ((user.classes_limit || 0) >= 100) return true;
+  const lower = (user.plan_name || '').toLowerCase();
+  return (
+    lower.includes('libre') ||
+    lower.includes('elite') ||
+    lower.includes('total') ||
+    lower.includes('ilimitado')
+  );
+}
+
 export interface LIUser {
   id: string;
   member_code: string;
